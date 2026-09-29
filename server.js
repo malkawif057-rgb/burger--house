@@ -1,12 +1,15 @@
 const express = require("express");
 const mysql = require("mysql2");
 const cors = require("cors");
+const path = require("path");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
+
+const PORT = process.env.PORT || 3000;
 
 const db = mysql.createConnection({
     host: process.env["MYSQL-HOST"],
@@ -16,276 +19,327 @@ const db = mysql.createConnection({
     port: Number(process.env["MYSQL-PORT"] || 3306)
 });
 
+/* =========================
+   اختبار MySQL
+========================= */
+
 db.connect((err) => {
     if (err) {
-        console.error("MYSQL ERROR:", err);
-        process.exit(1);
+        console.error("MYSQL ERROR:");
+        console.error(err);
+        return;
     }
 
     console.log("Connected to MySQL");
-
-    startServer();
 });
 
-function startServer() {
+/* =========================
+   الصفحة الرئيسية
+========================= */
 
-    app.get("/", (req, res) => {
-        res.sendFile(__dirname + "/index.html");
+app.get("/", (req, res) => {
+    res.sendFile(path.join(__dirname, "index.html"));
+});
+
+/* =========================
+   المنتجات
+========================= */
+
+app.get("/api/products", (req, res) => {
+    db.query("SELECT * FROM products ORDER BY id DESC", (err, results) => {
+        if (err) {
+            console.error(err);
+            return res.status(500).json({
+                error: "Database error"
+            });
+        }
+
+        res.json(results);
     });
+});
 
-    app.get("/api/products", (req, res) => {
-        db.query("SELECT * FROM products ORDER BY id DESC", (err, results) => {
-            if (err) {
-                console.error(err);
-                return res.status(500).json({ error: err.message });
-            }
+app.post("/api/products", (req, res) => {
+    const { name, price, description } = req.body;
 
-            res.json(results);
+    const sql = `
+        INSERT INTO products (name, price, description)
+        VALUES (?, ?, ?)
+    `;
+
+    db.query(sql, [name, price, description], (err, result) => {
+        if (err) {
+            console.error(err);
+            return res.status(500).json({
+                error: "Database error"
+            });
+        }
+
+        res.json({
+            message: "تمت إضافة المنتج",
+            id: result.insertId
         });
     });
+});
 
-    app.post("/api/products", (req, res) => {
-        const { name, price, description } = req.body;
+app.put("/api/products/:id", (req, res) => {
+    const { name, price, description } = req.body;
+    const id = req.params.id;
 
-        db.query(
-            "INSERT INTO products (name, price, description) VALUES (?, ?, ?)",
-            [name, price, description],
-            (err, result) => {
-                if (err) {
-                    console.error(err);
-                    return res.status(500).json({ error: err.message });
-                }
+    const sql = `
+        UPDATE products
+        SET name = ?, price = ?, description = ?
+        WHERE id = ?
+    `;
 
-                res.json({
-                    id: result.insertId,
-                    name,
-                    price,
-                    description
+    db.query(sql, [name, price, description, id], (err) => {
+        if (err) {
+            console.error(err);
+            return res.status(500).json({
+                error: "Database error"
+            });
+        }
+
+        res.json({
+            message: "تم تعديل المنتج"
+        });
+    });
+});
+
+app.delete("/api/products/:id", (req, res) => {
+    const id = req.params.id;
+
+    db.query(
+        "DELETE FROM products WHERE id = ?",
+        [id],
+        (err) => {
+            if (err) {
+                console.error(err);
+                return res.status(500).json({
+                    error: "Database error"
                 });
             }
-        );
-    });
 
-    app.put("/api/products/:id", (req, res) => {
-        const { name, price, description } = req.body;
-        const id = req.params.id;
+            res.json({
+                message: "تم حذف المنتج"
+            });
+        }
+    );
+});
 
-        db.query(
-            "UPDATE products SET name=?, price=?, description=? WHERE id=?",
-            [name, price, description, id],
-            (err) => {
-                if (err) {
-                    console.error(err);
-                    return res.status(500).json({ error: err.message });
-                }
+/* =========================
+   إنشاء طلب
+========================= */
 
-                res.json({ message: "Product updated successfully" });
+app.post("/api/orders", (req, res) => {
+
+    const {
+        customer_name,
+        phone,
+        address,
+        order_type,
+        total,
+        items
+    } = req.body;
+
+    const customerSql = `
+        INSERT INTO customers (name, phone, address)
+        VALUES (?, ?, ?)
+    `;
+
+    db.query(
+        customerSql,
+        [customer_name, phone, address],
+        (err, customerResult) => {
+
+            if (err) {
+                console.error(err);
+                return res.status(500).json({
+                    error: "Customer database error"
+                });
             }
-        );
-    });
 
-    app.delete("/api/products/:id", (req, res) => {
-        const id = req.params.id;
+            const customerId = customerResult.insertId;
 
-        db.query(
-            "DELETE FROM products WHERE id=?",
-            [id],
-            (err) => {
-                if (err) {
-                    console.error(err);
-                    return res.status(500).json({ error: err.message });
-                }
+            const orderSql = `
+                INSERT INTO orders
+                (customer_id, customer_name, phone, address, order_type, total)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `;
 
-                res.json({ message: "Product deleted successfully" });
-            }
-        );
-    });
+            db.query(
+                orderSql,
+                [
+                    customerId,
+                    customer_name,
+                    phone,
+                    address,
+                    order_type,
+                    total
+                ],
+                (err, orderResult) => {
 
-    app.post("/api/orders", (req, res) => {
+                    if (err) {
+                        console.error(err);
+                        return res.status(500).json({
+                            error: "Order database error"
+                        });
+                    }
 
-        const {
-            customer_name,
-            phone,
-            address,
-            order_type,
-            total,
-            items
-        } = req.body;
+                    const orderId = orderResult.insertId;
 
-        db.query(
-            `INSERT INTO customers (name, phone, address)
-             VALUES (?, ?, ?)`,
-            [customer_name, phone, address],
-            (customerErr, customerResult) => {
+                    if (!items || items.length === 0) {
+                        return res.json({
+                            message: "تم إنشاء الطلب",
+                            orderId
+                        });
+                    }
 
-                if (customerErr) {
-                    console.error(customerErr);
-                    return res.status(500).json({
-                        error: customerErr.message
-                    });
-                }
+                    const values = items.map(item => [
+                        orderId,
+                        item.product_id,
+                        item.quantity,
+                        item.price
+                    ]);
 
-                const customerId = customerResult.insertId;
+                    const itemsSql = `
+                        INSERT INTO order_items
+                        (order_id, product_id, quantity, price)
+                        VALUES ?
+                    `;
 
-                db.query(
-                    `INSERT INTO orders
-                    (customer_id, customer_name, phone, address, order_type, total, status)
-                    VALUES (?, ?, ?, ?, ?, ?, 'new')`,
-                    [
-                        customerId,
-                        customer_name,
-                        phone,
-                        address,
-                        order_type,
-                        total
-                    ],
-                    (orderErr, orderResult) => {
+                    db.query(
+                        itemsSql,
+                        [values],
+                        (err) => {
 
-                        if (orderErr) {
-                            console.error(orderErr);
-                            return res.status(500).json({
-                                error: orderErr.message
-                            });
-                        }
+                            if (err) {
+                                console.error(err);
+                                return res.status(500).json({
+                                    error: "Order items database error"
+                                });
+                            }
 
-                        const orderId = orderResult.insertId;
-
-                        if (!items || items.length === 0) {
-                            return res.json({
-                                success: true,
+                            res.json({
+                                message: "تم إنشاء الطلب",
                                 orderId
                             });
                         }
-
-                        const values = items.map(item => [
-                            orderId,
-                            item.product_id,
-                            item.quantity,
-                            item.price
-                        ]);
-
-                        db.query(
-                            `INSERT INTO order_items
-                            (order_id, product_id, quantity, price)
-                            VALUES ?`,
-                            [values],
-                            (itemsErr) => {
-
-                                if (itemsErr) {
-                                    console.error(itemsErr);
-                                    return res.status(500).json({
-                                        error: itemsErr.message
-                                    });
-                                }
-
-                                res.json({
-                                    success: true,
-                                    orderId
-                                });
-                            }
-                        );
-                    }
-                );
-            }
-        );
-    });
-
-    app.get("/api/orders", (req, res) => {
-
-        db.query(
-            `SELECT * FROM orders ORDER BY id DESC`,
-            (err, results) => {
-
-                if (err) {
-                    console.error(err);
-                    return res.status(500).json({
-                        error: err.message
-                    });
+                    );
                 }
+            );
+        }
+    );
+});
 
-                res.json(results);
-            }
-        );
+/* =========================
+   الطلبات
+========================= */
+
+app.get("/api/orders", (req, res) => {
+
+    const sql = `
+        SELECT *
+        FROM orders
+        ORDER BY id DESC
+    `;
+
+    db.query(sql, (err, results) => {
+
+        if (err) {
+            console.error(err);
+            return res.status(500).json({
+                error: "Database error"
+            });
+        }
+
+        res.json(results);
     });
+});
 
-    app.put("/api/orders/:id/status", (req, res) => {
+/* =========================
+   طلب واحد
+========================= */
 
-        const { status } = req.body;
-        const id = req.params.id;
+app.get("/api/orders/:id", (req, res) => {
 
-        db.query(
-            "UPDATE orders SET status=? WHERE id=?",
-            [status, id],
-            (err) => {
+    const orderId = req.params.id;
 
-                if (err) {
-                    console.error(err);
-                    return res.status(500).json({
-                        error: err.message
-                    });
-                }
+    const orderSql = `
+        SELECT *
+        FROM orders
+        WHERE id = ?
+    `;
 
-                res.json({
-                    success: true
+    db.query(orderSql, [orderId], (err, orders) => {
+
+        if (err) {
+            console.error(err);
+            return res.status(500).json({
+                error: "Database error"
+            });
+        }
+
+        if (orders.length === 0) {
+            return res.status(404).json({
+                error: "Order not found"
+            });
+        }
+
+        const itemsSql = `
+            SELECT *
+            FROM order_items
+            WHERE order_id = ?
+        `;
+
+        db.query(itemsSql, [orderId], (err, items) => {
+
+            if (err) {
+                console.error(err);
+                return res.status(500).json({
+                    error: "Database error"
                 });
             }
-        );
+
+            res.json({
+                order: orders[0],
+                items: items
+            });
+        });
     });
+});
 
-    app.get("/api/orders/:id", (req, res) => {
+/* =========================
+   تحديث حالة الطلب
+========================= */
 
-        const id = req.params.id;
+app.put("/api/orders/:id/status", (req, res) => {
 
-        db.query(
-            "SELECT * FROM orders WHERE id=?",
-            [id],
-            (orderErr, orders) => {
+    const orderId = req.params.id;
+    const { status } = req.body;
 
-                if (orderErr) {
-                    console.error(orderErr);
-                    return res.status(500).json({
-                        error: orderErr.message
-                    });
-                }
+    db.query(
+        "UPDATE orders SET status = ? WHERE id = ?",
+        [status, orderId],
+        (err) => {
 
-                if (orders.length === 0) {
-                    return res.status(404).json({
-                        error: "Order not found"
-                    });
-                }
-
-                db.query(
-                    `SELECT 
-                        order_items.*,
-                        products.name,
-                        products.description
-                     FROM order_items
-                     JOIN products
-                     ON order_items.product_id = products.id
-                     WHERE order_items.order_id=?`,
-                    [id],
-                    (itemsErr, items) => {
-
-                        if (itemsErr) {
-                            console.error(itemsErr);
-                            return res.status(500).json({
-                                error: itemsErr.message
-                            });
-                        }
-
-                        res.json({
-                            order: orders[0],
-                            items
-                        });
-                    }
-                );
+            if (err) {
+                console.error(err);
+                return res.status(500).json({
+                    error: "Database error"
+                });
             }
-        );
-    });
 
-    const PORT = process.env.PORT || 3000;
+            res.json({
+                message: "تم تحديث حالة الطلب"
+            });
+        }
+    );
+});
 
-    app.listen(PORT, "0.0.0.0", () => {
-        console.log(`Server running on port ${PORT}`);
-    });
-}
+/* =========================
+   تشغيل السيرفر
+========================= */
+
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on port ${PORT}`);
+});
